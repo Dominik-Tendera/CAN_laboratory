@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2025 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -55,6 +55,7 @@ static uint32_t txMailbox;
 
 static CAN_RxHeaderTypeDef rxHeader;
 static uint8_t rxData[8];
+static uint32_t acceptedCanId = 0x123;  // if 0xFFFFFFFF = print all IDs
 
 /* USER CODE END PV */
 
@@ -77,11 +78,10 @@ static void UART_Print(const char *s);
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
-int main(void)
-{
+ * @brief  The application entry point.
+ * @retval int
+ */
+int main(void) {
 
   /* USER CODE BEGIN 1 */
 
@@ -113,81 +113,73 @@ int main(void)
   CAN_ConfigFilters_AcceptAll();
 
   // Start CAN peripheral (works for Normal or Loopback mode)
-  if (HAL_CAN_Start(&hcan1) != HAL_OK)
-  {
-    UART_Print("CAN start failed\r\n");
+  if (HAL_CAN_Start(&hcan1) != HAL_OK) {
+    char buf[64];
+    uint32_t err = HAL_CAN_GetError(&hcan1);
+    snprintf(buf, sizeof(buf), "CAN start failed, err=0x%08lX\r\n", (unsigned long) err);
+    UART_Print(buf);
     Error_Handler();
   }
 
-  UART_Print("CAN demo ready.\r\n");
-  UART_Print("Tip: Set CAN1 to Loopback in .ioc for single-board test.\r\n");
+  UART_Print("CAN transmission start:\r\n");
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+  while (1) {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
     // 1) Periodically transmit a short ASCII text over CAN
-    CAN_SendText("HELLO");
+    CAN_SendText("Coconut");
 
     // 2) Poll for received frames in FIFO0 and print them over UART
-    while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) > 0)
-    {
-      if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &rxHeader, rxData) == HAL_OK)
-      {
-        char line[96];
-        int n = snprintf(line, sizeof(line),
-                         "RX id=0x%03lX dlc=%lu data=",
-                         (unsigned long)(rxHeader.IDE == CAN_ID_STD ? rxHeader.StdId : rxHeader.ExtId),
-                         (unsigned long)rxHeader.DLC);
-        if (n < 0) n = 0;
+    while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) > 0) {
+      if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &rxHeader, rxData) == HAL_OK) {
+        uint32_t idToCheck = (rxHeader.IDE == CAN_ID_STD) ? rxHeader.StdId : rxHeader.ExtId;
+        if (acceptedCanId == 0xFFFFFFFFUL || idToCheck == acceptedCanId) {
+          char line[256];
+          int n = snprintf(line, sizeof(line), "RX id=0x%03lX dlc=%lu data=", (unsigned long) idToCheck, (unsigned long) rxHeader.DLC);
+          if (n < 0)
+            n = 0;
+          for (uint8_t i = 0; i < rxHeader.DLC && (size_t) (n + 1) < sizeof(line) - 4; i++) {
+            char c = (char) rxData[i];
+            line[n++] = (c >= 32 && c <= 126) ? c : '.';
+          }
+          line[n++] = '\r';
+          line[n++] = '\n';
+          line[n] = '\0';
+          UART_Print(line);
 
-        // Append printable bytes (stop at DLC, ensure ASCII display)
-        for (uint8_t i = 0; i < rxHeader.DLC && (size_t)(n + 1) < sizeof(line) - 4; i++)
-        {
-          char c = (char)rxData[i];
-          line[n++] = (c >= 32 && c <= 126) ? c : '.';
+          HAL_GPIO_TogglePin(GPIOB, LD1_Pin);
         }
-        line[n++] = '\r';
-        line[n++] = '\n';
-        line[n] = '\0';
-        UART_Print(line);
-
-        // Quick visual indicator on LED1
-        HAL_GPIO_TogglePin(GPIOB, LD1_Pin);
-      }
-      else
-      {
+      } else {
         UART_Print("RX read error\r\n");
       }
     }
 
-    HAL_Delay(1000); // Send once per second
+    HAL_Delay(1000);  // Send once per second
   }
   /* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
-void SystemClock_Config(void)
-{
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+ * @brief System Clock Configuration
+ * @retval None
+ */
+void SystemClock_Config(void) {
+  RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
 
   /** Configure the main internal regulator output voltage
-  */
+   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
+   * in the RCC_OscInitTypeDef structure.
+   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -197,33 +189,29 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 7;
   RCC_OscInitStruct.PLL.PLLR = 2;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
     Error_Handler();
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+   */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
-  {
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK) {
     Error_Handler();
   }
 }
 
 /**
-  * @brief CAN1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_CAN1_Init(void)
-{
+ * @brief CAN1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_CAN1_Init(void) {
 
   /* USER CODE BEGIN CAN1_Init 0 */
 
@@ -234,18 +222,17 @@ static void MX_CAN1_Init(void)
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
   hcan1.Init.Prescaler = 5;
-  hcan1.Init.Mode = CAN_MODE_LOOPBACK;
+  hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
   hcan1.Init.TimeSeg1 = CAN_BS1_13TQ;
   hcan1.Init.TimeSeg2 = CAN_BS2_3TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
-  hcan1.Init.AutoBusOff = DISABLE;
-  hcan1.Init.AutoWakeUp = DISABLE;
-  hcan1.Init.AutoRetransmission = DISABLE;
+  hcan1.Init.AutoBusOff = ENABLE;        // Improve robustness
+  hcan1.Init.AutoWakeUp = ENABLE;        // Allow wake from sleep
+  hcan1.Init.AutoRetransmission = ENABLE;  // Retransmit on errors
   hcan1.Init.ReceiveFifoLocked = DISABLE;
   hcan1.Init.TransmitFifoPriority = DISABLE;
-  if (HAL_CAN_Init(&hcan1) != HAL_OK)
-  {
+  if (HAL_CAN_Init(&hcan1) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN CAN1_Init 2 */
@@ -255,19 +242,17 @@ static void MX_CAN1_Init(void)
 }
 
 /**
-  * @brief USART3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART3_UART_Init(void)
-{
+ * @brief USART3 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART3_UART_Init(void) {
 
   /* USER CODE BEGIN USART3_Init 0 */
 
   /* USER CODE END USART3_Init 0 */
 
   /* USER CODE BEGIN USART3_Init 1 */
-
   /* USER CODE END USART3_Init 1 */
   huart3.Instance = USART3;
   huart3.Init.BaudRate = 115200;
@@ -277,8 +262,7 @@ static void MX_USART3_UART_Init(void)
   huart3.Init.Mode = UART_MODE_TX_RX;
   huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
-  {
+  if (HAL_UART_Init(&huart3) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN USART3_Init 2 */
@@ -288,12 +272,11 @@ static void MX_USART3_UART_Init(void)
 }
 
 /**
-  * @brief USB_OTG_FS Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USB_OTG_FS_PCD_Init(void)
-{
+ * @brief USB_OTG_FS Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USB_OTG_FS_PCD_Init(void) {
 
   /* USER CODE BEGIN USB_OTG_FS_Init 0 */
 
@@ -312,8 +295,7 @@ static void MX_USB_OTG_FS_PCD_Init(void)
   hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
   hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE;
   hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
-  if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
-  {
+  if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN USB_OTG_FS_Init 2 */
@@ -323,13 +305,12 @@ static void MX_USB_OTG_FS_PCD_Init(void)
 }
 
 /**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
+ * @brief GPIO Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_GPIO_Init(void) {
+  GPIO_InitTypeDef GPIO_InitStruct = { 0 };
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -343,7 +324,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LD1_Pin|LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LD1_Pin | LD3_Pin | LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
@@ -355,7 +336,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(USER_Btn_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD1_Pin LD3_Pin LD2_Pin */
-  GPIO_InitStruct.Pin = LD1_Pin|LD3_Pin|LD2_Pin;
+  GPIO_InitStruct.Pin = LD1_Pin | LD3_Pin | LD2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -380,17 +361,16 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-static void UART_Print(const char *s)
-{
-  if (!s) return;
-  HAL_UART_Transmit(&huart3, (uint8_t *)s, (uint16_t)strlen(s), 100);
+static void UART_Print(const char *s) {
+  if (!s)
+    return;
+  HAL_UART_Transmit(&huart3, (uint8_t*) s, (uint16_t) strlen(s), 100);
 }
 
-static void CAN_ConfigFilters_AcceptAll(void)
-{
-  CAN_FilterTypeDef filter = {0};
+static void CAN_ConfigFilters_AcceptAll(void) {
+  CAN_FilterTypeDef filter = { 0 };
   filter.FilterBank = 0;                 // Use bank 0 for CAN1
-  filter.FilterMode = CAN_FILTERMODE_IDMASK; // Mask mode
+  filter.FilterMode = CAN_FILTERMODE_IDMASK;  // Mask mode
   filter.FilterScale = CAN_FILTERSCALE_32BIT;
   filter.FilterIdHigh = 0x0000;          // Accept all IDs
   filter.FilterIdLow = 0x0000;
@@ -398,18 +378,17 @@ static void CAN_ConfigFilters_AcceptAll(void)
   filter.FilterMaskIdLow = 0x0000;
   filter.FilterFIFOAssignment = CAN_FILTER_FIFO0;
   filter.FilterActivation = ENABLE;
-  filter.SlaveStartFilterBank = 14;      // Not used by CAN1 on F4, keep default-ish
+  filter.SlaveStartFilterBank = 14;  // Not used by CAN1 on F4, keep default-ish
 
-  if (HAL_CAN_ConfigFilter(&hcan1, &filter) != HAL_OK)
-  {
+  if (HAL_CAN_ConfigFilter(&hcan1, &filter) != HAL_OK) {
     UART_Print("Filter config failed\r\n");
     Error_Handler();
   }
 }
 
-static void CAN_SendText(const char *text)
-{
-  if (!text) return;
+static void CAN_SendText(const char *text) {
+  if (!text)
+    return;
 
   // Prepare a standard frame with ID 0x123
   txHeader.IDE = CAN_ID_STD;
@@ -420,22 +399,35 @@ static void CAN_SendText(const char *text)
   size_t len = strlen(text);
   // Send in chunks of up to 8 bytes (Classical CAN)
   size_t offset = 0;
-  while (offset < len)
-  {
-    uint8_t chunk = (uint8_t)((len - offset) > 8 ? 8 : (len - offset));
+  while (offset < len) {
+    uint8_t chunk = (uint8_t) ((len - offset) > 8 ? 8 : (len - offset));
     memcpy(txData, &text[offset], chunk);
     txHeader.DLC = chunk;
 
-    if (HAL_CAN_AddTxMessage(&hcan1, &txHeader, txData, &txMailbox) != HAL_OK)
-    {
-      UART_Print("TX add failed (no ACK if not loopback)\r\n");
+    if (HAL_CAN_AddTxMessage(&hcan1, &txHeader, txData, &txMailbox) != HAL_OK) {
+      UART_Print("TX add failed. ACK: In Normal mode another node must be present; otherwise TX errors occur.\r\n");
       break;
     }
 
     // Wait until the mailbox is free (basic flow control)
-    while (HAL_CAN_IsTxMessagePending(&hcan1, txMailbox))
-    {
+    while (HAL_CAN_IsTxMessagePending(&hcan1, txMailbox)) {
       HAL_Delay(1);
+    }
+
+    // Print a TX line similar to RX formatting
+    {
+      char line[256];
+      int n = snprintf(line, sizeof(line), "TX id=0x%03lX dlc=%lu data=", (unsigned long) (txHeader.IDE == CAN_ID_STD ? txHeader.StdId : txHeader.ExtId), (unsigned long) txHeader.DLC);
+      if (n < 0)
+        n = 0;
+      for (uint8_t i = 0; i < txHeader.DLC && (size_t) (n + 1) < sizeof(line) - 4; i++) {
+        char c = (char) txData[i];
+        line[n++] = (c >= 32 && c <= 126) ? c : '.';
+      }
+      line[n++] = '\r';
+      line[n++] = '\n';
+      line[n] = '\0';
+      UART_Print(line);
     }
     offset += chunk;
   }
@@ -444,16 +436,14 @@ static void CAN_SendText(const char *text)
 /* USER CODE END 4 */
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
+void Error_Handler(void) {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1)
-  {
+  while (1) {
   }
   /* USER CODE END Error_Handler_Debug */
 }
