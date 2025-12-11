@@ -21,6 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <string.h>
+#include <stdio.h>
 
 /* USER CODE END Includes */
 
@@ -47,6 +49,12 @@ UART_HandleTypeDef huart3;
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
+static CAN_TxHeaderTypeDef txHeader;
+static uint8_t txData[8];
+static uint32_t txMailbox;
+
+static CAN_RxHeaderTypeDef rxHeader;
+static uint8_t rxData[8];
 
 /* USER CODE END PV */
 
@@ -57,6 +65,9 @@ static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_CAN1_Init(void);
 /* USER CODE BEGIN PFP */
+static void CAN_ConfigFilters_AcceptAll(void);
+static void CAN_SendText(const char *text);
+static void UART_Print(const char *s);
 
 /* USER CODE END PFP */
 
@@ -98,6 +109,18 @@ int main(void)
   MX_USB_OTG_FS_PCD_Init();
   MX_CAN1_Init();
   /* USER CODE BEGIN 2 */
+  // Configure CAN filters to accept all frames into FIFO0
+  CAN_ConfigFilters_AcceptAll();
+
+  // Start CAN peripheral (works for Normal or Loopback mode)
+  if (HAL_CAN_Start(&hcan1) != HAL_OK)
+  {
+    UART_Print("CAN start failed\r\n");
+    Error_Handler();
+  }
+
+  UART_Print("CAN demo ready.\r\n");
+  UART_Print("Tip: Set CAN1 to Loopback in .ioc for single-board test.\r\n");
 
   /* USER CODE END 2 */
 
@@ -108,6 +131,42 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    // 1) Periodically transmit a short ASCII text over CAN
+    CAN_SendText("HELLO");
+
+    // 2) Poll for received frames in FIFO0 and print them over UART
+    while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) > 0)
+    {
+      if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &rxHeader, rxData) == HAL_OK)
+      {
+        char line[96];
+        int n = snprintf(line, sizeof(line),
+                         "RX id=0x%03lX dlc=%lu data=",
+                         (unsigned long)(rxHeader.IDE == CAN_ID_STD ? rxHeader.StdId : rxHeader.ExtId),
+                         (unsigned long)rxHeader.DLC);
+        if (n < 0) n = 0;
+
+        // Append printable bytes (stop at DLC, ensure ASCII display)
+        for (uint8_t i = 0; i < rxHeader.DLC && (size_t)(n + 1) < sizeof(line) - 4; i++)
+        {
+          char c = (char)rxData[i];
+          line[n++] = (c >= 32 && c <= 126) ? c : '.';
+        }
+        line[n++] = '\r';
+        line[n++] = '\n';
+        line[n] = '\0';
+        UART_Print(line);
+
+        // Quick visual indicator on LED1
+        HAL_GPIO_TogglePin(GPIOB, LD1_Pin);
+      }
+      else
+      {
+        UART_Print("RX read error\r\n");
+      }
+    }
+
+    HAL_Delay(1000); // Send once per second
   }
   /* USER CODE END 3 */
 }
@@ -175,10 +234,10 @@ static void MX_CAN1_Init(void)
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
   hcan1.Init.Prescaler = 5;
-  hcan1.Init.Mode = CAN_MODE_NORMAL;
+  hcan1.Init.Mode = CAN_MODE_LOOPBACK;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
   hcan1.Init.TimeSeg1 = CAN_BS1_13TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_3TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = DISABLE;
   hcan1.Init.AutoWakeUp = DISABLE;
@@ -321,6 +380,66 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+static void UART_Print(const char *s)
+{
+  if (!s) return;
+  HAL_UART_Transmit(&huart3, (uint8_t *)s, (uint16_t)strlen(s), 100);
+}
+
+static void CAN_ConfigFilters_AcceptAll(void)
+{
+  CAN_FilterTypeDef filter = {0};
+  filter.FilterBank = 0;                 // Use bank 0 for CAN1
+  filter.FilterMode = CAN_FILTERMODE_IDMASK; // Mask mode
+  filter.FilterScale = CAN_FILTERSCALE_32BIT;
+  filter.FilterIdHigh = 0x0000;          // Accept all IDs
+  filter.FilterIdLow = 0x0000;
+  filter.FilterMaskIdHigh = 0x0000;
+  filter.FilterMaskIdLow = 0x0000;
+  filter.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+  filter.FilterActivation = ENABLE;
+  filter.SlaveStartFilterBank = 14;      // Not used by CAN1 on F4, keep default-ish
+
+  if (HAL_CAN_ConfigFilter(&hcan1, &filter) != HAL_OK)
+  {
+    UART_Print("Filter config failed\r\n");
+    Error_Handler();
+  }
+}
+
+static void CAN_SendText(const char *text)
+{
+  if (!text) return;
+
+  // Prepare a standard frame with ID 0x123
+  txHeader.IDE = CAN_ID_STD;
+  txHeader.StdId = 0x123;
+  txHeader.RTR = CAN_RTR_DATA;
+  txHeader.TransmitGlobalTime = DISABLE;
+
+  size_t len = strlen(text);
+  // Send in chunks of up to 8 bytes (Classical CAN)
+  size_t offset = 0;
+  while (offset < len)
+  {
+    uint8_t chunk = (uint8_t)((len - offset) > 8 ? 8 : (len - offset));
+    memcpy(txData, &text[offset], chunk);
+    txHeader.DLC = chunk;
+
+    if (HAL_CAN_AddTxMessage(&hcan1, &txHeader, txData, &txMailbox) != HAL_OK)
+    {
+      UART_Print("TX add failed (no ACK if not loopback)\r\n");
+      break;
+    }
+
+    // Wait until the mailbox is free (basic flow control)
+    while (HAL_CAN_IsTxMessagePending(&hcan1, txMailbox))
+    {
+      HAL_Delay(1);
+    }
+    offset += chunk;
+  }
+}
 
 /* USER CODE END 4 */
 
@@ -338,8 +457,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.
