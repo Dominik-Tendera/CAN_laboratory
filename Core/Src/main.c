@@ -25,6 +25,9 @@
 #include <stdio.h>
 
 /* USER CODE END Includes */
+/* User config */
+#define CAN_TX_STDID   0x123U
+#define CAN_TX_TEXT    "Coconut"
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
@@ -55,7 +58,7 @@ static uint32_t txMailbox;
 
 static CAN_RxHeaderTypeDef rxHeader;
 static uint8_t rxData[8];
-static uint32_t acceptedCanId = 0x123;  // if 0xFFFFFFFF = print all IDs
+static uint32_t acceptedCanId = 0xFFFFFFFFUL;  // 0xFFFFFFFF = print all IDs
 
 /* USER CODE END PV */
 
@@ -69,6 +72,7 @@ static void MX_CAN1_Init(void);
 static void CAN_ConfigFilters_AcceptAll(void);
 static void CAN_SendText(const char *text);
 static void UART_Print(const char *s);
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
 
 /* USER CODE END PFP */
 
@@ -121,7 +125,18 @@ int main(void) {
     Error_Handler();
   }
 
-  UART_Print("CAN transmission start:\r\n");
+  // Enable RX FIFO0 message pending interrupt (interrupt-driven receive)
+  if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
+    UART_Print("CAN RX0 notification enable failed\r\n");
+    Error_Handler();
+  }
+
+  UART_Print("\r\n-----------------------------------------------------------------------------\r\n"
+             "CAN laboratory\r\n"
+             "Date: December 2025\r\n"
+             "Created by: Dominik Tendera, Jakub Stelmach, Jakub Kwiecien\r\n"
+             "Below you will see your sent CAN frames and received ones if set correctly:\r\n"
+             "-----------------------------------------------------------------------------\r\n");
 
   /* USER CODE END 2 */
 
@@ -132,32 +147,9 @@ int main(void) {
 
     /* USER CODE BEGIN 3 */
     // 1) Periodically transmit a short ASCII text over CAN
-    CAN_SendText("Coconut");
+    CAN_SendText(CAN_TX_TEXT);
 
-    // 2) Poll for received frames in FIFO0 and print them over UART
-    while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) > 0) {
-      if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &rxHeader, rxData) == HAL_OK) {
-        uint32_t idToCheck = (rxHeader.IDE == CAN_ID_STD) ? rxHeader.StdId : rxHeader.ExtId;
-        if (acceptedCanId == 0xFFFFFFFFUL || idToCheck == acceptedCanId) {
-          char line[256];
-          int n = snprintf(line, sizeof(line), "RX id=0x%03lX dlc=%lu data=", (unsigned long) idToCheck, (unsigned long) rxHeader.DLC);
-          if (n < 0)
-            n = 0;
-          for (uint8_t i = 0; i < rxHeader.DLC && (size_t) (n + 1) < sizeof(line) - 4; i++) {
-            char c = (char) rxData[i];
-            line[n++] = (c >= 32 && c <= 126) ? c : '.';
-          }
-          line[n++] = '\r';
-          line[n++] = '\n';
-          line[n] = '\0';
-          UART_Print(line);
-
-          HAL_GPIO_TogglePin(GPIOB, LD1_Pin);
-        }
-      } else {
-        UART_Print("RX read error\r\n");
-      }
-    }
+    // RX is handled in interrupt callback; main loop only paces TX
 
     HAL_Delay(1000);  // Send once per second
   }
@@ -392,7 +384,7 @@ static void CAN_SendText(const char *text) {
 
   // Prepare a standard frame with ID 0x123
   txHeader.IDE = CAN_ID_STD;
-  txHeader.StdId = 0x123;
+  txHeader.StdId = CAN_TX_STDID;
   txHeader.RTR = CAN_RTR_DATA;
   txHeader.TransmitGlobalTime = DISABLE;
 
@@ -430,6 +422,35 @@ static void CAN_SendText(const char *text) {
       UART_Print(line);
     }
     offset += chunk;
+  }
+}
+
+/* Interrupt callback: RX FIFO0 message pending */
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+  if (hcan != &hcan1)
+    return;
+  while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) > 0) {
+    if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &rxHeader, rxData) == HAL_OK) {
+      uint32_t idToCheck = (rxHeader.IDE == CAN_ID_STD) ? rxHeader.StdId : rxHeader.ExtId;
+      if (acceptedCanId == 0xFFFFFFFFUL || idToCheck == acceptedCanId) {
+        char line[256];
+        int n = snprintf(line, sizeof(line), "RX id=0x%03lX dlc=%lu data=", (unsigned long) idToCheck, (unsigned long) rxHeader.DLC);
+        if (n < 0)
+          n = 0;
+        for (uint8_t i = 0; i < rxHeader.DLC && (size_t) (n + 1) < sizeof(line) - 4; i++) {
+          char c = (char) rxData[i];
+          line[n++] = (c >= 32 && c <= 126) ? c : '.';
+        }
+        line[n++] = '\r';
+        line[n++] = '\n';
+        line[n] = '\0';
+        UART_Print(line);
+        HAL_GPIO_TogglePin(GPIOB, LD1_Pin);
+      }
+    } else {
+      UART_Print("RX read error\r\n");
+      break;
+    }
   }
 }
 
