@@ -34,8 +34,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define CAN_TX_STDID   0x123U
-#define CAN_TX_TEXT    "Coconut"
+#define CAN_TX_STDID   0x88U
+#define CAN_TX_TEXT    "BusOff!"
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,7 +57,7 @@ static uint32_t txMailbox;
 
 static CAN_RxHeaderTypeDef rxHeader;
 static uint8_t rxData[8];
-static uint32_t acceptedCanId = 0xFFFFFFFFUL;  // 0xFFFFFFFF = print all IDs
+static uint32_t acceptedCanId = 0x125;  // 0xFFFFFFFF = print all IDs
 
 /* USER CODE END PV */
 
