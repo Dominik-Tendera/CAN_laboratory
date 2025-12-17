@@ -26,8 +26,6 @@
 
 /* USER CODE END Includes */
 /* User config */
-#define CAN_TX_STDID   0x123U
-#define CAN_TX_TEXT    "Coconut"
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
@@ -36,7 +34,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define CAN_TX_STDID   0x123U
+#define CAN_TX_TEXT    "Coconut"
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -111,6 +110,10 @@ int main(void) {
   MX_GPIO_Init();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
+
+  __HAL_RCC_CAN1_FORCE_RESET();
+  HAL_Delay(1);
+  __HAL_RCC_CAN1_RELEASE_RESET();
   MX_CAN1_Init();
   /* USER CODE BEGIN 2 */
   // Configure CAN filters to accept all frames into FIFO0
@@ -219,9 +222,9 @@ static void MX_CAN1_Init(void) {
   hcan1.Init.TimeSeg1 = CAN_BS1_13TQ;
   hcan1.Init.TimeSeg2 = CAN_BS2_3TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
-  hcan1.Init.AutoBusOff = ENABLE;        // Improve robustness
+  hcan1.Init.AutoBusOff = DISABLE;        // Improve robustness
   hcan1.Init.AutoWakeUp = ENABLE;        // Allow wake from sleep
-  hcan1.Init.AutoRetransmission = ENABLE;  // Retransmit on errors
+  hcan1.Init.AutoRetransmission = DISABLE;  // Retransmit on errors
   hcan1.Init.ReceiveFifoLocked = DISABLE;
   hcan1.Init.TransmitFifoPriority = DISABLE;
   if (HAL_CAN_Init(&hcan1) != HAL_OK) {
@@ -406,7 +409,7 @@ static void CAN_SendText(const char *text) {
       HAL_Delay(1);
     }
 
-    // Print a TX line similar to RX formatting
+    // Print a TX line via UART
     {
       char line[256];
       int n = snprintf(line, sizeof(line), "TX id=0x%03lX dlc=%lu data=", (unsigned long) (txHeader.IDE == CAN_ID_STD ? txHeader.StdId : txHeader.ExtId), (unsigned long) txHeader.DLC);
