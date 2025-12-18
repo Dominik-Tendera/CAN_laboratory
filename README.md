@@ -1,6 +1,7 @@
 # CAN Laboratory — NUCLEO‑F446ZE
 
-This lab teaches basic CAN setup and messaging on the NUCLEO‑F446ZE using STM32 HAL. Students will primarily work in the `.ioc` (CubeMX) to configure peripherals, then run a minimal demo that sends ASCII "HELLO" over CAN and prints any received text over `USART3` (ST‑LINK VCP).
+This lab teaches basic CAN setup and messaging on the NUCLEO‑F446ZE using STM32 HAL. Students will primarily work in the `.ioc` (CubeMX) to configure peripherals, then run program that sends ASCII over CAN and prints any received text over `USART3` (ST‑LINK VCP).
+View pdf instruction.
 
 ## Project Overview
 - Purpose: Practice configuring CAN in CubeMX, sending/receiving frames, and verifying on UART.
@@ -42,32 +43,3 @@ If you restart the `.ioc` or create a new STM32 Project, re‑apply these minima
 3. Termination: 120 Ω at both ends of the bus.
 4. Matching timing: Ensure both nodes use identical bit timing.
 5. Flash both boards; one node will send "HELLO" and the other will print the RX frame.
-
-## Editing IDs and Payload
-- Change StdID: `Core/Src/main.c` → `txHeader.StdId = 0x123;`
-- Change payload: `Core/Src/main.c` → `CAN_SendText("HELLO");`
-- Extended ID: set `txHeader.IDE = CAN_ID_EXT` and adjust filters as needed.
-
-## Suggested Lab Exercises
-- Filters: Configure accept‑only filter for a specific StdID (e.g., `0x321`) and verify behavior.
-- Payload framing: Send longer text (e.g., "Hello, World!") and observe multi‑frame chunks (≤8 bytes/frame).
-- Echo node: On RX, re‑transmit payload using a different ID to create ping‑pong between boards.
-- Button‑triggered TX: Send when `USER_Btn` is pressed; debounce in software.
-
-## Troubleshooting `.ioc` Opening
-- In CubeIDE, if `.ioc` shows as text:
-   - Try right‑click → Open With → CubeMX Editor.
-   - Ensure STM32 firmware repository is set: Window → Preferences → STM32Cube → Firmware Repository → e.g., `C:\Users\<you>\STM32Cube\Repository`.
-   - If the CubeMX editor still isn’t available, install packs via CubeMX standalone.
-- Install packs via STM32CubeMX:
-   - Help → Manage embedded software packages → Install `STM32F4`.
-   - Then open `CAN_laboratory.ioc` and Generate Code.
-- Manual pack install (fallback):
-   - Download `STM32Cube_FW_F4_V1.xx.x.zip` from ST.
-   - Extract into `C:\Users\<you>\STM32Cube\Repository\STM32Cube_FW_F4_V1.xx.x`.
-   - Point CubeIDE/CubeMX to this repository path.
-
-## Notes
-- Polling RX is used for simplicity; NVIC/interrupt RX can be added later.
-- In Normal mode, a single board without a second node/transceiver/termination won’t ACK TX; use Loopback for solo tests.
-- This repo already includes HAL/CMSIS Drivers and startup/linker files for F446.
